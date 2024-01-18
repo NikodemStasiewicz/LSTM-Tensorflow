@@ -1,6 +1,5 @@
 const tf = require('@tensorflow/tfjs');
 const plotly = require('plotly')('Nikodem', 'X4UvmKRbeCCwYEmXvFWi');
-const assert = require('assert');
 
 // Normalizacja Min-Max Scaling
 const normalizeData = (data) => {
@@ -14,7 +13,7 @@ const transformInputData = (data) => {
   return tf.tensor3d(flatData, [data.length, data[0].length, 1]);
 };
 
-const createLSTMModel = () => {
+const createLSTMModel1 = () => {
   const model = tf.sequential();
   model.add(
     tf.layers.lstm({
@@ -38,6 +37,33 @@ const createLSTMModel = () => {
   );
   model.add(tf.layers.dropout({ rate: 0.2 }));
   model.compile({ optimizer: 'rmsprop', loss: 'meanSquaredError' });
+  return model;
+};
+
+const createLSTMModel2 = () => {
+  const model = tf.sequential();
+  model.add(
+    tf.layers.lstm({
+      units: 64,
+      inputShape: [null, 1],
+      recurrentInitializer: 'orthogonal',
+      returnSequences: true,
+    })
+  );
+  model.add(
+    tf.layers.lstm({
+      units: 32,
+      recurrentInitializer: 'orthogonal',
+      returnSequences: true,
+    })
+  );
+  model.add(
+    tf.layers.timeDistributed({
+      layer: tf.layers.dense({ units: 1 })
+    })
+  );
+  model.add(tf.layers.dropout({ rate: 0.2 }));
+  model.compile({ optimizer: 'adam', loss: 'meanSquaredError' });
   return model;
 };
 
@@ -71,50 +97,36 @@ const transformedValidationData = transformInputData(normalizedValidationData);
 
 const earlyStopping = tf.callbacks.earlyStopping({ monitor: 'val_loss', patience: 10 });
 
-const model = createLSTMModel();
+const model1 = createLSTMModel1();
+const model2 = createLSTMModel2();
 
-// Testy jednostkowe
-function runUnitTests() {
-  testTransformInputData();
-  testCreateLSTMModel();
-}
+Promise.all([
+  model1.fit(transformedData, transformedData, {
+    epochs: 150,
+    validationData: [transformedValidationData, transformedValidationData],
+    callbacks: [earlyStopping],
+  }),
+  model2.fit(transformedData, transformedData, {
+    epochs: 150,
+    validationData: [transformedValidationData, transformedValidationData],
+    callbacks: [earlyStopping],
+  }),
+]).then(([history1, history2]) => {
+  console.log('Training complete for Model 1:', history1);
+  console.log('Training complete for Model 2:', history2);
 
-// Test funkcji transformInputData
-function testTransformInputData() {
-  const testData = [
-    [1, 2, 3],
-    [4, 5, 6]
-  ];
+  // Wizualizacja wyników dla Modelu 1
+  const predictedData1 = model1.predict(transformedValidationData).arraySync();
+  plotResults(normalizedValidationData, predictedData1, 'lstm-plot-model1');
 
-  const transformedData = transformInputData(testData);
-  assert.deepStrictEqual(transformedData.shape, [2, 3, 1], 'transformInputData shape test failed');
-}
-
-// Test funkcji createLSTMModel
-function testCreateLSTMModel() {
-  const model = createLSTMModel();
-  assert.ok(model instanceof tf.Sequential, 'createLSTMModel test failed');
-}
-
-// Uruchomienie testów
-runUnitTests();
-
-// Proces trenowania
-model.fit(transformedData, transformedData, {
-  epochs: 150,
-  validationData: [transformedValidationData, transformedValidationData],
-  callbacks: [earlyStopping],
-}).then((history) => {
-  console.log('Training complete:', history);
-
-  // Wizualizacja wyników
-  const predictedData = model.predict(transformedValidationData).arraySync();
-  plotResults(normalizedValidationData, predictedData);
+  // Wizualizacja wyników dla Modelu 2
+  const predictedData2 = model2.predict(transformedValidationData).arraySync();
+  plotResults(normalizedValidationData, predictedData2, 'lstm-plot-model2');
 }).catch((error) => {
   console.error('Error during training:', error);
 });
 
-function plotResults(actualData, predictedData) {
+function plotResults(actualData, predictedData, filename) {
   // Przygotowanie danych do wykresu
   const actualTrace = {
     x: [...Array(actualData.length).keys()],
@@ -137,7 +149,7 @@ function plotResults(actualData, predictedData) {
   };
 
   const chartData = [actualTrace, predictedTrace];
-  const chartOptions = { layout: layout, filename: 'lstm-plot', fileopt: 'overwrite' };
+  const chartOptions = { layout: layout, filename: filename, fileopt: 'overwrite' };
 
   // Wygeneruj i wyślij wykres do Plotly
   plotly.plot(chartData, chartOptions, function (err, msg) {
